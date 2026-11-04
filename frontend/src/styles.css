@@ -306,6 +306,18 @@ button.big {
   padding: 4px 14px 20px;
 }
 
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 12px;
+}
+
 .sheet-content h2 {
   margin: 16px 0 8px;
   font-size: 12px;

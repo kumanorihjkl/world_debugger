@@ -404,6 +404,7 @@ export default function App(): JSX.Element {
   const [cameraId, setCameraId] = useState("");
   const [hasStream, setHasStream] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState<"camera" | "rules" | "zones" | "others">("rules");
   const sheetRef = useRef<HTMLDivElement>(null);
   const [sheetH, setSheetH] = useState(0);
   const grabDrag = useRef<{ startY: number; moved: boolean } | null>(null);
@@ -807,6 +808,21 @@ export default function App(): JSX.Element {
         </div>
         <div className="sheet-body">
           <div className="sheet-content">
+            <div className="tabs" role="tablist">
+              {(["camera", "rules", "zones", "others"] as const).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={sheetTab === t}
+                  className={sheetTab === t ? "on" : ""}
+                  onClick={() => setSheetTab(t)}
+                >
+                  {t === "camera" ? "Camera" : t === "rules" ? "Rules" : t === "zones" ? "Zones" : "Others"}
+                </button>
+              ))}
+            </div>
+            {sheetTab === "camera" && (
+              <>
             <h2>Camera{resolution && <span className="meta-inline"> · {resolution}</span>}</h2>
             <div className="row">
               {cameras.length > 1 ? (
@@ -845,6 +861,10 @@ export default function App(): JSX.Element {
                 <button onClick={() => void startCamera()}>Start camera</button>
               )}
             </div>
+              </>
+            )}
+            {sheetTab === "rules" && (
+              <>
             <h2>Rules</h2>
         <div className="row">
           <input
@@ -885,6 +905,10 @@ export default function App(): JSX.Element {
         ))}
         {rules.length === 0 && <p className="hint">No rules yet. Try “Keep drinks away from laptops.”</p>}
 
+              </>
+            )}
+            {sheetTab === "zones" && (
+              <>
         <h2>Zones</h2>
         <div className="row">
           <input
@@ -904,6 +928,10 @@ export default function App(): JSX.Element {
           ))}
         </div>
 
+              </>
+            )}
+            {sheetTab === "others" && (
+              <>
         <h2>Issues</h2>
         {violations.map((v, i) => (
           <div key={`${v.rule_id}-${i}`} className="issue">
@@ -932,6 +960,8 @@ export default function App(): JSX.Element {
         <p className="hint">Fixture frames for the Demo 1 violation → Resolved flow.</p>
 
         <div className="foot">Powered by Muse Spark 1.3 + SAM 3.1{mocked ? " · Mock mode" : ""}</div>
+              </>
+            )}
           </div>
         </div>
       </div>
