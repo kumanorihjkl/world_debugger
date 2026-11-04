@@ -945,7 +945,18 @@ export default function App(): JSX.Element {
             )}
           </div>
         ))}
-        {rules.length === 0 && <p className="hint">No rules yet. Try “Keep drinks away from laptops.”</p>}
+        {creating && (
+          <div className="rule-item creating" aria-live="polite">
+            <div className="head">
+              <strong>Creating…</strong>
+              <span className="spinner" aria-hidden="true" />
+            </div>
+            <div className="meta">{ruleText}</div>
+          </div>
+        )}
+        {rules.length === 0 && !creating && (
+          <p className="hint">No rules yet. Try “Keep drinks away from laptops.”</p>
+        )}
 
               </>
             )}
