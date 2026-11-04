@@ -86,17 +86,34 @@ cd frontend && npm run dev
 Open http://localhost:8100 in a browser. The dev server proxies `/api` to the backend.
 (517x is used by other projects, so this project uses 8100.)
 
+## UI tour
+
+- Fullscreen camera. If no stream is running, a centered **Start camera**
+  button appears.
+- The bottom sheet has a grabber: tap it or pull it up to reveal Rules,
+  Camera, Zones, Issues, and the offline demo. Pull down to close it.
+- The dock (always visible) holds **Analyze**, the **Auto** toggle, and
+  **Draw zone**.
+- Camera section (inside the sheet): camera selector (when 2+ cameras),
+  ⟳ rotation button (0/90/180/270°, saved in the browser) for
+  sideways-mounted cameras, Restart camera, and the live resolution readout.
+- Violations appear as red mask contours + floating toasts. Errors also
+  appear as toasts above the sheet.
+
 ## Demo scenario
 
-Demo 1 (spatial): type `Keep drinks away from laptops.` → Create Rule →
-`✓ Visual rule compiled` → hold a cup near a laptop → ⚠ Spill Risk with red
-overlays → move it away → ✓ Resolved.
+Demo 1 (spatial): pull up the sheet, type `Keep drinks away from laptops.` →
+Create Rule → `✓ Visual rule compiled` → hold a cup near a laptop → Analyze
+(or Auto) → ⚠ Spill Risk with red contours → move it away → ✓ Resolved.
 
-Demo 2 (zone): Draw zone on the overlay, name it `doorway` →
+Demo 2 (zone): Draw zone on the video, name it `doorway` →
 `Keep this doorway clear.` → put a box in the zone → ⚠ Blocked access →
 remove it → ✓ Resolved.
 
-No camera? Use “Demo without camera” buttons (fixture frames).
+No camera? Use “Demo without camera” buttons (fixture frames, mock mode only).
+
+Rules persist in `backend/rules.json` across backend restarts. Auto analysis
+stops after 3 minutes to save API cost.
 
 ## Current limitations
 
@@ -107,8 +124,10 @@ No camera? Use “Demo without camera” buttons (fixture frames).
   decode + boundary tracing), so objects get outlines, not just boxes.
 - Distances are image-space normalized; no metric depth
   (`requires_metric_depth` rules show a warning instead of guessing).
-- Rules store is in-memory; zones are rectangles.
+- Rules persist in `backend/rules.json`; zones are rectangles.
 - Mock mode fixtures are fixed layouts for development.
+- USB/virtual cameras top out at landscape 1920×1080 over UVC; use the ⟳
+  button for sideways-mounted cameras.
 
 ## Future work
 
