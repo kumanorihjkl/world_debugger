@@ -438,6 +438,43 @@ input:not([type]) {
   align-items: center;
 }
 
+.dsl-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.dsl-chip {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.dsl-chip.dsl-zone {
+  border-style: dashed;
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.dsl-arrow {
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.dsl-badge {
+  border: 1px solid var(--ink-dim);
+  color: var(--ink-dim);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .sev {
   font-family: var(--mono);
   font-size: 11px;

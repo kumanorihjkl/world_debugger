@@ -379,6 +379,42 @@ function drawOverlay(
   }
 }
 
+function DslFlow({ rule }: { rule: VisualRule }): JSX.Element {
+  const cond = rule.condition;
+  const promptOf = (id: string | null | undefined): string => {
+    if (!id) return "?";
+    const sel = rule.selectors.find((s) => s.id === id);
+    return sel ? sel.sam_prompt : id;
+  };
+  const isZoneOp = cond.operator === "inside_zone" || cond.operator === "outside_zone";
+  const extras: string[] = [];
+  if (cond.operator === "near" || cond.operator === "far_from") {
+    extras.push(String(cond.threshold));
+  }
+  if (cond.duration_seconds != null) {
+    extras.push(`${cond.duration_seconds}s`);
+  }
+  const label = extras.length > 0 ? `${cond.operator} · ${extras.join(" · ")}` : cond.operator;
+  return (
+    <div className="dsl-flow" title={`Visual Rule DSL: ${cond.operator}`}>
+      <span className="dsl-chip">{promptOf(cond.subject)}</span>
+      {isZoneOp ? (
+        <>
+          <span className="dsl-arrow">─ {label} ─▶</span>
+          <span className="dsl-chip dsl-zone">⟡ {cond.zone_id ?? "?"}</span>
+        </>
+      ) : cond.object ? (
+        <>
+          <span className="dsl-arrow">─ {label} ─▶</span>
+          <span className="dsl-chip">{promptOf(cond.object)}</span>
+        </>
+      ) : (
+        <span className="dsl-badge">{label}</span>
+      )}
+    </div>
+  );
+}
+
 export default function App(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -902,10 +938,8 @@ export default function App(): JSX.Element {
                 <button onClick={() => void removeRule(r.id)}>Delete</button>
               </span>
             </div>
-            <div className="meta">
-              {r.condition.operator} · {r.original_text}
-            </div>
-            <div className="meta">detects: {r.selectors.map((s) => s.sam_prompt).join(", ")}</div>
+            <DslFlow rule={r} />
+            <div className="meta">{r.original_text}</div>
             {r.condition.requires_metric_depth && (
               <div className="error">Needs metric depth — not available in this MVP.</div>
             )}
