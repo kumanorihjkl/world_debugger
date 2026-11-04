@@ -22,6 +22,7 @@ from app.services.meta_client import MetaAPIError, MetaClient, call_with_retry
 SYSTEM_PROMPT = """You compile physical-world monitoring rules into a VisualRule DSL.
 Rules:
 - Use only these operators: near, far_from, overlaps, inside_zone, outside_zone, present_for, absent_for, not_near_for.
+- Zone-operator semantics: a keep-out / keep-clear request ("keep X out of Z", "nothing may be left in Z", "no X in Z") MUST use outside_zone with zone_id Z (it fires when something is inside Z). Use inside_zone only when the object is required to stay inside Z (it fires when the object leaves Z).
 - Each selector gets ONE short single-object noun phrase as sam_prompt (e.g. 'cup', 'laptop'). Never compound prompts like 'cup or bottle'; split them into separate selectors.
 - Distances are image-space normalized (0..1). Never invent metric measurements.
 - If the user asks for real-world units (cm, meters, inches), set requires_metric_depth=true.
