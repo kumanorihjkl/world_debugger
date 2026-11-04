@@ -243,13 +243,9 @@ function drawOverlay(
   const h = (canvas.height = canvas.clientHeight || 480);
   const live = !!video && video.readyState >= 2 && video.videoWidth > 0;
   if (!live) {
+    // Black stage; the centered Start camera button is the call to action.
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = "#9aa6b2";
-    ctx.font = "14px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Camera off — press Start camera", w / 2, h / 2);
-    ctx.textAlign = "left";
     return;
   }
   const content = drawVideoFrame(ctx, video, w, h, rot);
@@ -335,9 +331,10 @@ export default function App(): JSX.Element {
   const [autoNote, setAutoNote] = useState("");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [cameraId, setCameraId] = useState("");
-  const [menuOpen, setMenuOpen] = useState(
-    () => typeof window === "undefined" || window.innerWidth > 900,
-  );
+  const [hasStream, setHasStream] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const grabDrag = useRef<{ startY: number; moved: boolean } | null>(null);
+  const grabMoved = useRef(false);
 
   const prevViolationCount = useRef(0);
   const analyzingRef = useRef(false);
@@ -412,9 +409,11 @@ export default function App(): JSX.Element {
           v.srcObject = stream;
           await v.play();
         }
+        setHasStream(true);
         setStatus((s) => (s === "idle" ? "capturing" : s));
         void refreshCameras();
       } catch (e) {
+        setHasStream(false);
         setError(`Camera failed: ${e instanceof Error ? e.message : String(e)}`);
         setStatus("error");
       }
@@ -546,7 +545,7 @@ export default function App(): JSX.Element {
 
   return (
     <>
-      <div className={`stage${menuOpen ? " with-drawer" : ""}`}>
+      <div className="stage">
         <video
           ref={videoRef}
           muted
@@ -594,68 +593,25 @@ export default function App(): JSX.Element {
         />
       </div>
       <canvas ref={snapRef} style={{ display: "none" }} />
+      {!hasStream && (
+        <div className="center-start">
+          <button className="primary big" onClick={() => void startCamera()}>
+            Start camera
+          </button>
+        </div>
+      )}
 
       <div className="brand">
         <h1>WorldDebugger</h1>
         <span className="tagline">Debug the physical world.</span>
       </div>
       <div className="top-right">
-        {resolution && <span className="status-pill">{resolution}</span>}
         <span className={`status-pill ${status}`}>{status}</span>
-        <button className="icon" onClick={() => setMenuOpen((o) => !o)} title="Menu">
-          ☰
-        </button>
       </div>
 
-      <div className={`dock${menuOpen ? " shifted" : ""}`}>
-        {cameras.length > 1 && (
-          <select
-            value={cameraId}
-            onChange={(e) => {
-              setCameraId(e.target.value);
-              void startCamera(e.target.value);
-            }}
-            title="Camera"
-          >
-            <option value="">Default camera</option>
-            {cameras.map((c, i) => (
-              <option key={c.deviceId || i} value={c.deviceId}>
-                {c.label || `Camera ${i + 1}`}
-              </option>
-            ))}
-          </select>
-        )}
-        <button onClick={() => void startCamera()}>Start camera</button>
-        <button className="primary" onClick={() => void runAnalyze()}>
-          Analyze
-        </button>
-        <button className={auto ? "on" : ""} onClick={() => setAuto((a) => !a)}>
-          Auto {auto ? "on" : "off"}
-        </button>
-        <button className={drawing ? "on" : ""} onClick={() => {
-          setDrawing((d) => !d);
-          setDraft(null);
-        }}>
-          {drawing ? "Drawing… drag on video" : "Draw zone"}
-        </button>
-        <button
-          className={rotation !== 0 ? "on" : ""}
-          title="Rotate preview (for sideways-mounted cameras)"
-          onClick={() => {
-            const i = ROTATIONS.indexOf(rotation as (typeof ROTATIONS)[number]);
-            setRotation(ROTATIONS[(i + 1) % ROTATIONS.length]);
-          }}
-        >
-          ⟳ {rotation}°
-        </button>
-      </div>
-      {autoNote && !auto && (
-        <div className="toasts">
-          <div className="toast">{autoNote}</div>
-        </div>
-      )}
-
-      <div className="toasts" style={autoNote && !auto ? { bottom: 76 } : undefined}>
+      <div className="toasts">
+        {error && <div className="toast">{error}</div>}
+        {autoNote && !auto && <div className="toast">{autoNote}</div>}
         {violations.slice(0, 2).map((v, i) => (
           <div key={`${v.rule_id}-${i}`} className="toast">
             <strong>⚠ {v.rule_name}</strong>
@@ -665,13 +621,98 @@ export default function App(): JSX.Element {
         {resolvedFlash && violations.length === 0 && <div className="toast ok">✓ Resolved</div>}
       </div>
 
-      <aside className={`drawer${menuOpen ? " open" : ""}`}>
-        <div className="close-row">
-          <button className="icon" onClick={() => setMenuOpen(false)} title="Close">
-            ×
+      <div className={`sheet${sheetOpen ? " open" : ""}`}>
+        <div
+          className="grabber"
+          title={sheetOpen ? "Pull down to close" : "Pull up for rules"}
+          onClick={() => {
+            if (grabMoved.current) {
+              grabMoved.current = false;
+              return;
+            }
+            setSheetOpen((o) => !o);
+          }}
+          onPointerDown={(e) => {
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* no capture support: drag still works while over the grabber */
+            }
+            grabDrag.current = { startY: e.clientY, moved: false };
+          }}
+          onPointerMove={(e) => {
+            const d = grabDrag.current;
+            if (!d) return;
+            const dy = e.clientY - d.startY;
+            if (Math.abs(dy) > 48) {
+              d.moved = true;
+              setSheetOpen(dy < 0);
+            }
+          }}
+          onPointerUp={() => {
+            grabMoved.current = grabDrag.current?.moved ?? false;
+            grabDrag.current = null;
+          }}
+          onPointerCancel={() => {
+            grabDrag.current = null;
+          }}
+        />
+        <div className="dock">
+          <button className="primary" onClick={() => void runAnalyze()}>
+            Analyze
+          </button>
+          <label className="toggle" title="Auto analyze every 2s (stops after 3 min)">
+            <input
+              type="checkbox"
+              checked={auto}
+              onChange={() => setAuto((a) => !a)}
+            />
+            <span className="track" />
+            Auto
+          </label>
+          <button className={drawing ? "on" : ""} onClick={() => {
+            setDrawing((d) => !d);
+            setDraft(null);
+          }}>
+            {drawing ? "Drawing… drag on video" : "Draw zone"}
           </button>
         </div>
-        <h2>Rules</h2>
+        <div className="sheet-body">
+          <div className="sheet-content">
+            <h2>Camera{resolution && <span className="meta-inline"> · {resolution}</span>}</h2>
+            <div className="row">
+              {cameras.length > 1 ? (
+                <select
+                  value={cameraId}
+                  onChange={(e) => {
+                    setCameraId(e.target.value);
+                    void startCamera(e.target.value);
+                  }}
+                  title="Camera"
+                >
+                  <option value="">Default camera</option>
+                  {cameras.map((c, i) => (
+                    <option key={c.deviceId || i} value={c.deviceId}>
+                      {c.label || `Camera ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="hint">Single camera found.</span>
+              )}
+              <button
+                className={rotation !== 0 ? "on" : ""}
+                title="Rotate preview (for sideways-mounted cameras)"
+                onClick={() => {
+                  const i = ROTATIONS.indexOf(rotation as (typeof ROTATIONS)[number]);
+                  setRotation(ROTATIONS[(i + 1) % ROTATIONS.length]);
+                }}
+              >
+                ⟳ {rotation}°
+              </button>
+              <button onClick={() => void startCamera()}>Restart camera</button>
+            </div>
+            <h2>Rules</h2>
         <div className="row">
           <input
             type="text"
@@ -757,9 +798,10 @@ export default function App(): JSX.Element {
         </div>
         <p className="hint">Fixture frames for the Demo 1 violation → Resolved flow.</p>
 
-        {error && <div className="error">{error}</div>}
         <div className="foot">Powered by Muse Spark 1.3 + SAM 3.1{mocked ? " · Mock mode" : ""}</div>
-      </aside>
+          </div>
+        </div>
+      </div>
     </>
   );
 }
