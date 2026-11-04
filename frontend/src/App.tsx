@@ -242,13 +242,60 @@ function iou(a: BoundingBox, b: BoundingBox): number {
   return union <= 0 ? 0 : inter / union;
 }
 
+const MAX_ZONE_POINTS = 64;
+const ZONE_POINT_STEP = 0.008;
+const MIN_ZONE_AREA = 0.001;
+
+function polygonArea(pts: [number, number][]): number {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[(i + 1) % pts.length];
+    sum += x0 * y1 - x1 * y0;
+  }
+  return Math.abs(sum) / 2;
+}
+
+function orientation(a: [number, number], b: [number, number], c: [number, number]): number {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function segmentsProperlyCross(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number],
+): boolean {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+  return o1 * o2 < 0 && o3 * o4 < 0;
+}
+
+function polygonSelfIntersects(pts: [number, number][]): boolean {
+  const n = pts.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      // Neighboring edges share a vertex by construction; the first and
+      // last edges do too once the outline is closed.
+      if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+      if (segmentsProperlyCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function drawOverlay(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement | null,
   objects: SceneObject[],
   violatingIds: Set<string>,
   zones: Zone[],
-  draft: { x0: number; y0: number; x1: number; y1: number } | null,
+  draft: [number, number][] | null,
   rot: number,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -281,10 +328,15 @@ function drawOverlay(
     ctx.font = "12px monospace";
     ctx.fillText(z.name, X(z.polygon[0][0]) + 4, Y(z.polygon[0][1]) - 6);
   }
-  if (draft) {
+  if (draft && draft.length > 0) {
     ctx.strokeStyle = "#f5a524";
     ctx.lineWidth = 2;
-    ctx.strokeRect(X(draft.x0), Y(draft.y0), X(draft.x1) - X(draft.x0), Y(draft.y1) - Y(draft.y0));
+    ctx.beginPath();
+    draft.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(X(px), Y(py));
+      else ctx.lineTo(X(px), Y(py));
+    });
+    ctx.stroke();
   }
   // One physical object can appear as several overlapping scene entries (one
   // per rule selector). Paint every entry that overlaps a violating box red so
@@ -345,7 +397,7 @@ export default function App(): JSX.Element {
   const [zones, setZones] = useState<Zone[]>([]);
   const [zoneName, setZoneName] = useState("doorway");
   const [drawing, setDrawing] = useState(false);
-  const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [draft, setDraft] = useState<[number, number][] | null>(null);
   const [auto, setAuto] = useState(false);
   const [autoNote, setAutoNote] = useState("");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -589,23 +641,45 @@ export default function App(): JSX.Element {
           onMouseDown={(e) => {
             if (!drawing) return;
             const p = canvasPos(e);
-            setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+            setError("");
+            setDraft([[p.x, p.y]]);
           }}
           onMouseMove={(e) => {
             if (!drawing || !draft) return;
             const p = canvasPos(e);
-            setDraft({ ...draft, x1: p.x, y1: p.y });
+            const last = draft[draft.length - 1];
+            const dx = p.x - last[0];
+            const dy = p.y - last[1];
+            if (dx * dx + dy * dy < ZONE_POINT_STEP * ZONE_POINT_STEP) return;
+            if (draft.length >= MAX_ZONE_POINTS * 4) return;
+            setDraft([...draft, [p.x, p.y]]);
           }}
           onMouseUp={() => {
             if (!drawing || !draft) return;
+            const finish = (message: string): void => {
+              setError(message);
+              setDraft(null);
+            };
+            if (draft.length < 3 || polygonArea(draft) < MIN_ZONE_AREA) {
+              finish("Zone is too small. Draw a larger outline.");
+              return;
+            }
+            if (polygonSelfIntersects(draft)) {
+              finish("Zone lines must not cross. Draw a simple outline without crossing lines.");
+              return;
+            }
+            // Evenly thin the trail to a bounded point count.
+            let poly: [number, number][] = draft;
+            if (poly.length > MAX_ZONE_POINTS) {
+              const step = poly.length / MAX_ZONE_POINTS;
+              poly = Array.from(
+                { length: MAX_ZONE_POINTS },
+                (_, i) => poly[Math.min(poly.length - 1, Math.floor(i * step))],
+              );
+            }
             const name = zoneName.trim() || "zone";
-            const poly: [number, number][] = [
-              [Math.min(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
-              [Math.max(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
-              [Math.max(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
-              [Math.min(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
-            ];
             setZones((prev) => [...prev.filter((z) => z.id !== name), { id: name, name, polygon: poly }]);
+            setError("");
             setDraft(null);
             setDrawing(false);
           }}
@@ -693,7 +767,7 @@ export default function App(): JSX.Element {
             setDrawing((d) => !d);
             setDraft(null);
           }}>
-            {drawing ? "Drawing… drag on video" : "Draw zone"}
+            {drawing ? "Drawing… trace an outline" : "Draw zone"}
           </button>
         </div>
         <div className="sheet-body">
