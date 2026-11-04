@@ -827,7 +827,11 @@ export default function App(): JSX.Element {
                 ⟳ {rotation}°
               </button>
               <button onClick={() => void startCamera()}>Restart camera</button>
-              {hasStream && <button onClick={stopCamera}>Stop camera</button>}
+              {hasStream ? (
+                <button onClick={stopCamera}>Stop camera</button>
+              ) : (
+                <button onClick={() => void startCamera()}>Start camera</button>
+              )}
             </div>
             <h2>Rules</h2>
         <div className="row">
