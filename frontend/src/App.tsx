@@ -10,6 +10,223 @@ import type {
 
 const POLL_MS = 2000;
 const AUTO_STOP_MS = 3 * 60 * 1000;
+const ROTATIONS = [0, 90, 180, 270] as const;
+
+interface ContentRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// Miniature canvases for ambient-mode background. Downsample plus a small
+// hand-rolled gaussian blur reads as a soft blur when stretched, identically
+// in every browser (ctx.filter is unsupported in some embedded browsers).
+const AMBIENT_SIZE = 96;
+const AMBIENT_TINY = 24;
+const AMBIENT_BLUR_RADIUS = 5;
+const AMBIENT_BLUR_PASSES = 3;
+let ambientCanvas: HTMLCanvasElement | null = null;
+let ambientTiny: HTMLCanvasElement | null = null;
+
+function blurCanvas(canvas: HTMLCanvasElement, radius: number, passes: number): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  if (w === 0 || h === 0 || radius <= 0) return;
+  let src = ctx.getImageData(0, 0, w, h);
+  const tmp = ctx.createImageData(w, h);
+  const div = radius * 2 + 1;
+  for (let p = 0; p < passes; p += 1) {
+    // Horizontal sliding-window box blur.
+    const s = src.data;
+    const t = tmp.data;
+    for (let y = 0; y < h; y += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      const row = y * w * 4;
+      for (let x = -radius; x <= radius; x += 1) {
+        const cx = Math.min(w - 1, Math.max(0, x)) * 4 + row;
+        r += s[cx];
+        g += s[cx + 1];
+        b += s[cx + 2];
+        a += s[cx + 3];
+      }
+      for (let x = 0; x < w; x += 1) {
+        const o = row + x * 4;
+        t[o] = r / div;
+        t[o + 1] = g / div;
+        t[o + 2] = b / div;
+        t[o + 3] = a / div;
+        const sub = Math.min(w - 1, Math.max(0, x - radius)) * 4 + row;
+        const add = Math.min(w - 1, Math.max(0, x + radius + 1)) * 4 + row;
+        r += s[add] - s[sub];
+        g += s[add + 1] - s[sub + 1];
+        b += s[add + 2] - s[sub + 2];
+        a += s[add + 3] - s[sub + 3];
+      }
+    }
+    // Vertical pass (reads tmp, writes back into src).
+    const s2 = tmp.data;
+    const t2 = src.data;
+    for (let x = 0; x < w; x += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let y = -radius; y <= radius; y += 1) {
+        const cy = (Math.min(h - 1, Math.max(0, y)) * w + x) * 4;
+        r += s2[cy];
+        g += s2[cy + 1];
+        b += s2[cy + 2];
+        a += s2[cy + 3];
+      }
+      for (let y = 0; y < h; y += 1) {
+        const o = (y * w + x) * 4;
+        t2[o] = r / div;
+        t2[o + 1] = g / div;
+        t2[o + 2] = b / div;
+        t2[o + 3] = a / div;
+        const sub = (Math.min(h - 1, Math.max(0, y - radius)) * w + x) * 4;
+        const add = (Math.min(h - 1, Math.max(0, y + radius + 1)) * w + x) * 4;
+        r += s2[add] - s2[sub];
+        g += s2[add + 1] - s2[sub + 1];
+        b += s2[add + 2] - s2[sub + 2];
+        a += s2[add + 3] - s2[sub + 3];
+      }
+    }
+  }
+  ctx.putImageData(src, 0, 0);
+}
+
+function drawAmbientBackground(
+  ctx: CanvasRenderingContext2D,
+  v: HTMLVideoElement,
+  W: number,
+  H: number,
+  rot: number,
+): void {
+  if (typeof document === "undefined") return;
+  if (!ambientCanvas) {
+    ambientCanvas = document.createElement("canvas");
+    ambientCanvas.width = AMBIENT_SIZE;
+    ambientCanvas.height = AMBIENT_SIZE;
+    // Pixel readbacks for the hand-rolled blur.
+    ambientCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  const actx = ambientCanvas.getContext("2d");
+  if (!actx) return;
+  const sw = v.videoWidth;
+  const sh = v.videoHeight;
+  const S = AMBIENT_SIZE;
+  const scale = Math.max(S / sw, S / sh);
+  actx.save();
+  actx.clearRect(0, 0, S, S);
+  if (rot === 90) {
+    actx.translate(S, 0);
+    actx.rotate(Math.PI / 2);
+  } else if (rot === 270) {
+    actx.translate(0, S);
+    actx.rotate(-Math.PI / 2);
+  }
+  actx.drawImage(v, (S - sw * scale) / 2, (S - sh * scale) / 2, sw * scale, sh * scale);
+  actx.restore();
+  blurCanvas(ambientCanvas, AMBIENT_BLUR_RADIUS, AMBIENT_BLUR_PASSES);
+  if (!ambientTiny) {
+    ambientTiny = document.createElement("canvas");
+    ambientTiny.width = AMBIENT_TINY;
+    ambientTiny.height = AMBIENT_TINY;
+  }
+  const tinyCtx = ambientTiny.getContext("2d");
+  if (!tinyCtx) return;
+  tinyCtx.save();
+  tinyCtx.imageSmoothingEnabled = true;
+  tinyCtx.imageSmoothingQuality = "high";
+  tinyCtx.clearRect(0, 0, AMBIENT_TINY, AMBIENT_TINY);
+  tinyCtx.drawImage(ambientCanvas, 0, 0, AMBIENT_TINY, AMBIENT_TINY);
+  tinyCtx.restore();
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  // Overdraw edges so the upscale has no transparent rim.
+  ctx.drawImage(ambientTiny, -8, -8, W + 16, H + 16);
+  ctx.restore();
+}
+
+function drawVideoFrame(
+  ctx: CanvasRenderingContext2D,
+  v: HTMLVideoElement,
+  W: number,
+  H: number,
+  rot: number,
+): ContentRect {
+  const full: ContentRect = { x: 0, y: 0, w: W, h: H };
+  const sw = v.videoWidth;
+  const sh = v.videoHeight;
+  if (sw === 0 || sh === 0) return full;
+  const rotated = rot % 180 !== 0;
+  if (rotated) {
+    // Ambient mode: blurred fill instead of black bars.
+    drawAmbientBackground(ctx, v, W, H, rot);
+  }
+  // Target size in rotated space. Upright fills the stage (cover); rotated
+  // fits the whole frame (contain) so nothing is cropped away.
+  const tw = rot % 180 !== 0 ? H : W;
+  const th = rot % 180 !== 0 ? W : H;
+  const scale =
+    rot % 180 !== 0
+      ? Math.min(tw / sw, th / sh)
+      : Math.max(tw / sw, th / sh);
+  const dw = sw * scale;
+  const dh = sh * scale;
+  const dx = (tw - dw) / 2;
+  const dy = (th - dh) / 2;
+  ctx.save();
+  if (rot === 90) {
+    ctx.translate(W, 0);
+    ctx.rotate(Math.PI / 2);
+  } else if (rot === 180) {
+    ctx.translate(W, H);
+    ctx.rotate(Math.PI);
+  } else if (rot === 270) {
+    ctx.translate(0, H);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(v, dx, dy, dw, dh);
+  ctx.restore();
+  // Content rect in canvas pixels (for mapping normalized overlay coords).
+  if (rot === 90) return { x: W - dy - dh, y: dx, w: dh, h: dw };
+  if (rot === 180) return { x: W - dx - dw, y: H - dy - dh, w: dw, h: dh };
+  if (rot === 270) return { x: dy, y: H - dx - dw, w: dh, h: dw };
+  return { x: dx, y: dy, w: dw, h: dh };
+}
+
+function videoContentRect(
+  clientW: number,
+  clientH: number,
+  sw: number,
+  sh: number,
+  rot: number,
+): ContentRect {
+  if (sw === 0 || sh === 0) return { x: 0, y: 0, w: clientW, h: clientH };
+  const tw = rot % 180 !== 0 ? clientH : clientW;
+  const th = rot % 180 !== 0 ? clientW : clientH;
+  const scale =
+    rot % 180 !== 0
+      ? Math.min(tw / sw, th / sh)
+      : Math.max(tw / sw, th / sh);
+  const dw = sw * scale;
+  const dh = sh * scale;
+  const dx = (tw - dw) / 2;
+  const dy = (th - dh) / 2;
+  if (rot === 90) return { x: clientW - dy - dh, y: dx, w: dh, h: dw };
+  if (rot === 180) return { x: clientW - dx - dw, y: clientH - dy - dh, w: dw, h: dh };
+  if (rot === 270) return { x: dy, y: clientH - dx - dw, w: dh, h: dw };
+  return { x: dx, y: dy, w: dw, h: dh };
+}
 
 function drawOverlay(
   canvas: HTMLCanvasElement,
@@ -18,6 +235,7 @@ function drawOverlay(
   violatingIds: Set<string>,
   zones: Zone[],
   draft: { x0: number; y0: number; x1: number; y1: number } | null,
+  rot: number,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -34,47 +252,43 @@ function drawOverlay(
     ctx.textAlign = "left";
     return;
   }
+  const content = drawVideoFrame(ctx, video, w, h, rot);
+  const X = (nx: number): number => content.x + nx * content.w;
+  const Y = (ny: number): number => content.y + ny * content.h;
   for (const z of zones) {
     ctx.strokeStyle = "#f5a524";
     ctx.setLineDash([6, 4]);
     ctx.lineWidth = 2;
     ctx.beginPath();
     z.polygon.forEach(([px, py], i) => {
-      const X = px * w;
-      const Y = py * h;
-      if (i === 0) ctx.moveTo(X, Y);
-      else ctx.lineTo(X, Y);
+      if (i === 0) ctx.moveTo(X(px), Y(py));
+      else ctx.lineTo(X(px), Y(py));
     });
     ctx.closePath();
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = "#f5a524";
     ctx.font = "12px monospace";
-    ctx.fillText(z.name, z.polygon[0][0] * w + 4, z.polygon[0][1] * h - 6);
+    ctx.fillText(z.name, X(z.polygon[0][0]) + 4, Y(z.polygon[0][1]) - 6);
   }
   if (draft) {
     ctx.strokeStyle = "#f5a524";
     ctx.lineWidth = 2;
-    ctx.strokeRect(
-      draft.x0 * w,
-      draft.y0 * h,
-      (draft.x1 - draft.x0) * w,
-      (draft.y1 - draft.y0) * h,
-    );
+    ctx.strokeRect(X(draft.x0), Y(draft.y0), X(draft.x1) - X(draft.x0), Y(draft.y1) - Y(draft.y0));
   }
   for (const o of objects) {
     const bad = violatingIds.has(o.id);
-    const x = o.bbox.x_min * w;
-    const y = o.bbox.y_min * h;
+    const x = X(o.bbox.x_min);
+    const y = Y(o.bbox.y_min);
+    const bw = X(o.bbox.x_max) - X(o.bbox.x_min);
+    const bh = Y(o.bbox.y_max) - Y(o.bbox.y_min);
     const contour = o.polygon && o.polygon.length >= 3 ? o.polygon : null;
     ctx.strokeStyle = bad ? "#e5484d" : "#35c26e";
     if (contour) {
       ctx.beginPath();
       contour.forEach(([px, py], i) => {
-        const X = px * w;
-        const Y = py * h;
-        if (i === 0) ctx.moveTo(X, Y);
-        else ctx.lineTo(X, Y);
+        if (i === 0) ctx.moveTo(X(px), Y(py));
+        else ctx.lineTo(X(px), Y(py));
       });
       ctx.closePath();
       if (bad) {
@@ -87,10 +301,10 @@ function drawOverlay(
       // Fallback when no contour is available (mock mode, decode failure).
       if (bad) {
         ctx.fillStyle = "rgba(229,72,77,0.25)";
-        ctx.fillRect(x, y, (o.bbox.x_max - o.bbox.x_min) * w, (o.bbox.y_max - o.bbox.y_min) * h);
+        ctx.fillRect(x, y, bw, bh);
       }
       ctx.lineWidth = bad ? 3 : 1.5;
-      ctx.strokeRect(x, y, (o.bbox.x_max - o.bbox.x_min) * w, (o.bbox.y_max - o.bbox.y_min) * h);
+      ctx.strokeRect(x, y, bw, bh);
     }
     ctx.fillStyle = bad ? "#e5484d" : "#35c26e";
     ctx.font = "12px monospace";
@@ -155,6 +369,28 @@ export default function App(): JSX.Element {
     navigator.mediaDevices?.addEventListener?.("devicechange", () => void refreshCameras());
   }, [refreshCameras]);
 
+  const [resolution, setResolution] = useState("");
+  const [sensorSize, setSensorSize] = useState<[number, number]>([0, 0]);
+  const [rotation, setRotation] = useState<number>(() => {
+    const saved = typeof window === "undefined" ? null : window.localStorage.getItem("wd-rotation");
+    const n = saved === null ? 0 : Number(saved);
+    return ROTATIONS.includes(n as (typeof ROTATIONS)[number]) ? n : 0;
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("wd-rotation", String(rotation));
+    } catch {
+      /* private mode etc: rotation just won't persist */
+    }
+    setResolution((prev) => {
+      if (sensorSize[0] === 0) return prev;
+      return rotation % 180 !== 0
+        ? `${sensorSize[1]}×${sensorSize[0]}`
+        : `${sensorSize[0]}×${sensorSize[1]}`;
+    });
+  }, [rotation, sensorSize]);
+
   const startCamera = useCallback(
     async (deviceId?: string) => {
       setError("");
@@ -163,7 +399,13 @@ export default function App(): JSX.Element {
         old?.getTracks().forEach((t) => t.stop());
         const chosen = deviceId ?? cameraId;
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: chosen ? { deviceId: { exact: chosen } } : true,
+          video: {
+            // Camo exposes at most 1920x1080 landscape (verified: no
+            // 1080x1920 portrait mode; portrait ideals pick a square crop).
+            ...(chosen ? { deviceId: { exact: chosen } } : {}),
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
         });
         const v = videoRef.current;
         if (v) {
@@ -183,15 +425,17 @@ export default function App(): JSX.Element {
   const snapshotBase64 = useCallback((): string => {
     const v = videoRef.current;
     const c = snapRef.current;
-    if (!v || !c || v.readyState < 2) return "";
-    c.width = v.videoWidth || 640;
-    c.height = v.videoHeight || 480;
+    if (!v || !c || v.readyState < 2 || v.videoWidth === 0) return "";
+    // Upright full-frame snapshot (same orientation as the overlay coords).
+    const swap = rotation % 180 !== 0;
+    c.width = swap ? v.videoHeight : v.videoWidth;
+    c.height = swap ? v.videoWidth : v.videoHeight;
     const ctx = c.getContext("2d");
     if (!ctx) return "";
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    drawVideoFrame(ctx, v, c.width, c.height, rotation);
     const url = c.toDataURL("image/jpeg", 0.8);
     return url.includes(",") ? url.split(",")[1] : "";
-  }, []);
+  }, [rotation]);
 
   const runAnalyze = useCallback(
     async (imageVariant = "default") => {
@@ -244,13 +488,14 @@ export default function App(): JSX.Element {
     if (!v || !c) return;
     const viol = new Set<string>();
     violations.forEach((x) => x.object_ids.forEach((id) => viol.add(id)));
-    const draw = (): void => {
-      drawOverlay(c, v, objects, viol, zones, draft);
+    let raf = 0;
+    const frame = (): void => {
+      drawOverlay(c, v, objects, viol, zones, draft, rotation);
+      raf = window.requestAnimationFrame(frame);
     };
-    draw();
-    const t = window.setInterval(draw, 500);
-    return () => window.clearInterval(t);
-  }, [objects, violations, zones, draft]);
+    raf = window.requestAnimationFrame(frame);
+    return () => window.cancelAnimationFrame(raf);
+  }, [objects, violations, zones, draft, rotation]);
 
   const createRule = useCallback(async () => {
     if (creating) return;
@@ -281,18 +526,45 @@ export default function App(): JSX.Element {
 
   const canvasPos = (e: React.MouseEvent): { x: number; y: number } => {
     const c = canvasRef.current;
+    const v = videoRef.current;
     if (!c) return { x: 0, y: 0 };
     const r = c.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * c.clientWidth;
+    const py = ((e.clientY - r.top) / r.height) * c.clientHeight;
+    const content = videoContentRect(
+      c.clientWidth,
+      c.clientHeight,
+      v?.videoWidth ?? 0,
+      v?.videoHeight ?? 0,
+      rotation,
+    );
     return {
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      x: Math.min(1, Math.max(0, (px - content.x) / content.w)),
+      y: Math.min(1, Math.max(0, (py - content.y) / content.h)),
     };
   };
 
   return (
     <>
-      <div className="stage">
-        <video ref={videoRef} muted playsInline autoPlay />
+      <div className={`stage${menuOpen ? " with-drawer" : ""}`}>
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          autoPlay
+          style={{ display: "none" }}
+          onPlaying={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth > 0) {
+              setSensorSize([v.videoWidth, v.videoHeight]);
+              setResolution(
+                rotation % 180 !== 0
+                  ? `${v.videoHeight}×${v.videoWidth}`
+                  : `${v.videoWidth}×${v.videoHeight}`,
+              );
+            }
+          }}
+        />
         <canvas
           ref={canvasRef}
           className="overlay"
@@ -328,13 +600,14 @@ export default function App(): JSX.Element {
         <span className="tagline">Debug the physical world.</span>
       </div>
       <div className="top-right">
+        {resolution && <span className="status-pill">{resolution}</span>}
         <span className={`status-pill ${status}`}>{status}</span>
         <button className="icon" onClick={() => setMenuOpen((o) => !o)} title="Menu">
           ☰
         </button>
       </div>
 
-      <div className="dock">
+      <div className={`dock${menuOpen ? " shifted" : ""}`}>
         {cameras.length > 1 && (
           <select
             value={cameraId}
@@ -364,6 +637,16 @@ export default function App(): JSX.Element {
           setDraft(null);
         }}>
           {drawing ? "Drawing… drag on video" : "Draw zone"}
+        </button>
+        <button
+          className={rotation !== 0 ? "on" : ""}
+          title="Rotate preview (for sideways-mounted cameras)"
+          onClick={() => {
+            const i = ROTATIONS.indexOf(rotation as (typeof ROTATIONS)[number]);
+            setRotation(ROTATIONS[(i + 1) % ROTATIONS.length]);
+          }}
+        >
+          ⟳ {rotation}°
         </button>
       </div>
       {autoNote && !auto && (

@@ -36,6 +36,12 @@ body {
   background: #000;
 }
 
+@media (min-width: 700px) {
+  .stage.with-drawer {
+    right: 360px;
+  }
+}
+
 .stage video {
   position: absolute;
   inset: 0;
@@ -394,6 +400,12 @@ input:not([type]) {
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+}
+
+@media (min-width: 700px) {
+  .dock.shifted {
+    left: calc(50% - 180px);
+  }
 }
 
 @media (max-width: 700px) {
