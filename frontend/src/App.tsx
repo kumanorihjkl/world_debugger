@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeFrame, compileRule, deleteRule, health, listRules } from "./api/client";
 import type {
+  BoundingBox,
   SceneObject,
   Status,
   Violation,
@@ -228,6 +229,19 @@ function videoContentRect(
   return { x: dx, y: dy, w: dw, h: dh };
 }
 
+function iou(a: BoundingBox, b: BoundingBox): number {
+  const ix0 = Math.max(a.x_min, b.x_min);
+  const iy0 = Math.max(a.y_min, b.y_min);
+  const ix1 = Math.min(a.x_max, b.x_max);
+  const iy1 = Math.min(a.y_max, b.y_max);
+  const inter = Math.max(0, ix1 - ix0) * Math.max(0, iy1 - iy0);
+  if (inter <= 0) return 0;
+  const areaA = Math.max(0, a.x_max - a.x_min) * Math.max(0, a.y_max - a.y_min);
+  const areaB = Math.max(0, b.x_max - b.x_min) * Math.max(0, b.y_max - b.y_min);
+  const union = areaA + areaB - inter;
+  return union <= 0 ? 0 : inter / union;
+}
+
 function drawOverlay(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement | null,
@@ -272,8 +286,13 @@ function drawOverlay(
     ctx.lineWidth = 2;
     ctx.strokeRect(X(draft.x0), Y(draft.y0), X(draft.x1) - X(draft.x0), Y(draft.y1) - Y(draft.y0));
   }
+  // One physical object can appear as several overlapping scene entries (one
+  // per rule selector). Paint every entry that overlaps a violating box red so
+  // a red fill never ends up with a green outline on top of it.
+  const violBoxes = objects.filter((o) => violatingIds.has(o.id)).map((o) => o.bbox);
   for (const o of objects) {
-    const bad = violatingIds.has(o.id);
+    const bad =
+      violatingIds.has(o.id) || violBoxes.some((v) => iou(o.bbox, v) >= 0.5);
     const x = X(o.bbox.x_min);
     const y = Y(o.bbox.y_min);
     const bw = X(o.bbox.x_max) - X(o.bbox.x_min);
