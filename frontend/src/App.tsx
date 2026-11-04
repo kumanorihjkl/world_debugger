@@ -799,7 +799,7 @@ export default function App(): JSX.Element {
             <span className="track" />
             Auto
           </label>
-          {sheetOpen && sheetTab === "zones" && (
+          {sheetTab === "zones" && (
             <button
               className={drawing ? "on" : ""}
               style={{ marginLeft: "auto" }}
