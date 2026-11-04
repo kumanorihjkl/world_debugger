@@ -279,19 +279,30 @@ def evaluate_rule(
         objects = _objects_for_selector(scene, cond.object or "", concepts)
         duration = cond.duration_seconds or 10.0
         mapping = tracker.update(scene.objects, now)
-        if not subjects or not objects:
+        if not subjects:
             return None
-        dist, s, o = _min_pair_distance(subjects, objects)
         threshold = cond.threshold or DEFAULT_FAR_FROM_THRESHOLD
+        dist, s, _ = _min_pair_distance(subjects, objects)
         if dist < threshold and s is not None:
+            # Near right now: stamp the contact time and keep waiting.
             tid = mapping.get(s.id)
-            if tid and tracker.present_duration(tid, now) >= duration:
+            if tid and tid in tracker.tracks:
+                tracker.tracks[tid]["last_near"] = now
+            return None
+        object_concept = concepts.get(cond.object or "") or cond.object or "object"
+        for s in subjects:
+            tid = mapping.get(s.id)
+            track = tracker.tracks.get(tid) if tid else None
+            if not track:
+                continue
+            anchor = track.get("last_near", track["first_seen"])
+            if now - anchor >= duration:
                 return Violation(
                     rule_id=rule.id,
                     rule_name=rule.name,
                     severity=rule.severity.value,
-                    message=f"A {s.concept} stayed too close to a {o.concept} for {duration:g}s.",
-                    object_ids=[s.id, o.id] if o else [s.id],
+                    message=f"A {s.concept} has not been near a {object_concept} for {duration:g}s.",
+                    object_ids=[s.id],
                     timestamp=now,
                 )
         return None

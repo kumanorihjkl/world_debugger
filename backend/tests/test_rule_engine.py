@@ -113,3 +113,46 @@ def test_temporal_present_for() -> None:
     violation = rule_engine.evaluate_rule(rule, scene, now=1011.0, tracker=tracker)  # type: ignore[arg-type]
     assert violation is not None
     assert "unattended" in violation.message
+
+
+def _unattended_rule() -> VisualRule:
+    return VisualRule(
+        id="rule-not-near",
+        name="Laptop left unattended",
+        original_text="Warn me if a laptop is left unattended for more than 10 seconds.",
+        severity=Severity.WARNING,
+        selectors=[
+            Selector(id="laptop", concept="laptop", sam_prompt="laptop"),
+            Selector(id="person", concept="person", sam_prompt="person"),
+        ],
+        condition=Condition(
+            operator=Operator.NOT_NEAR_FOR, subject="laptop", object="person", duration_seconds=10.0
+        ),
+    )
+
+
+def test_not_near_for_fires_when_object_absent() -> None:
+    rule = _unattended_rule()
+    tracker = rule_engine.Tracker()
+    laptop_only = _scene([{"concept": "laptop", "selector_id": "laptop", "bbox": [0.5, 0.4, 1.0, 0.6]}])
+    assert rule_engine.evaluate_rule(rule, laptop_only, now=1000.0, tracker=tracker) is None  # type: ignore[arg-type]
+    violation = rule_engine.evaluate_rule(rule, laptop_only, now=1011.0, tracker=tracker)  # type: ignore[arg-type]
+    assert violation is not None
+    assert "not been near" in violation.message
+
+
+def test_not_near_for_resets_when_near() -> None:
+    rule = _unattended_rule()
+    tracker = rule_engine.Tracker()
+    laptop_only = _scene([{"concept": "laptop", "selector_id": "laptop", "bbox": [0.5, 0.4, 1.0, 0.6]}])
+    laptop_with_person = _scene(
+        [
+            {"concept": "laptop", "selector_id": "laptop", "bbox": [0.5, 0.4, 1.0, 0.6]},
+            {"concept": "person", "selector_id": "person", "bbox": [0.45, 0.35, 0.65, 0.75]},
+        ]
+    )
+    assert rule_engine.evaluate_rule(rule, laptop_only, now=1000.0, tracker=tracker) is None  # type: ignore[arg-type]
+    assert rule_engine.evaluate_rule(rule, laptop_with_person, now=1005.0, tracker=tracker) is None  # type: ignore[arg-type]
+    assert rule_engine.evaluate_rule(rule, laptop_only, now=1012.0, tracker=tracker) is None  # type: ignore[arg-type]
+    violation = rule_engine.evaluate_rule(rule, laptop_only, now=1016.0, tracker=tracker)  # type: ignore[arg-type]
+    assert violation is not None
