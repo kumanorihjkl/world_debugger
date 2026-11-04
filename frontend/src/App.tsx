@@ -505,6 +505,16 @@ export default function App(): JSX.Element {
     [cameraId, refreshCameras],
   );
 
+  const stopCamera = useCallback((): void => {
+    setAuto(false);
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+    setHasStream(false);
+    setStatus("idle");
+  }, []);
+
   const snapshotBase64 = useCallback((): string => {
     const v = videoRef.current;
     const c = snapRef.current;
@@ -817,6 +827,7 @@ export default function App(): JSX.Element {
                 ⟳ {rotation}°
               </button>
               <button onClick={() => void startCamera()}>Restart camera</button>
+              {hasStream && <button onClick={stopCamera}>Stop camera</button>}
             </div>
             <h2>Rules</h2>
         <div className="row">
