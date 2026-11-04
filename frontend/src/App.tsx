@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 const POLL_MS = 2000;
+const AUTO_STOP_MS = 3 * 60 * 1000;
 
 function drawOverlay(
   canvas: HTMLCanvasElement,
@@ -28,7 +29,9 @@ function drawOverlay(
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = "#9aa6b2";
     ctx.font = "14px sans-serif";
-    ctx.fillText("Camera off — press Start camera", 16, 30);
+    ctx.textAlign = "center";
+    ctx.fillText("Camera off — press Start camera", w / 2, h / 2);
+    ctx.textAlign = "left";
     return;
   }
   for (const z of zones) {
@@ -116,8 +119,11 @@ export default function App(): JSX.Element {
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [auto, setAuto] = useState(false);
   const [autoNote, setAutoNote] = useState("");
-
-const AUTO_STOP_MS = 3 * 60 * 1000;
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [cameraId, setCameraId] = useState("");
+  const [menuOpen, setMenuOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth > 900,
+  );
 
   const prevViolationCount = useRef(0);
   const analyzingRef = useRef(false);
@@ -135,21 +141,44 @@ const AUTO_STOP_MS = 3 * 60 * 1000;
       });
   }, []);
 
-  const startCamera = useCallback(async () => {
-    setError("");
+  const refreshCameras = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const v = videoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        await v.play();
-      }
-      setStatus((s) => (s === "idle" ? "capturing" : s));
-    } catch (e) {
-      setError(`Camera failed: ${e instanceof Error ? e.message : String(e)}`);
-      setStatus("error");
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setCameras(devices.filter((d) => d.kind === "videoinput"));
+    } catch {
+      /* device labels need prior permission; list stays empty */
     }
   }, []);
+
+  useEffect(() => {
+    void refreshCameras();
+    navigator.mediaDevices?.addEventListener?.("devicechange", () => void refreshCameras());
+  }, [refreshCameras]);
+
+  const startCamera = useCallback(
+    async (deviceId?: string) => {
+      setError("");
+      try {
+        const old = videoRef.current?.srcObject as MediaStream | null;
+        old?.getTracks().forEach((t) => t.stop());
+        const chosen = deviceId ?? cameraId;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: chosen ? { deviceId: { exact: chosen } } : true,
+        });
+        const v = videoRef.current;
+        if (v) {
+          v.srcObject = stream;
+          await v.play();
+        }
+        setStatus((s) => (s === "idle" ? "capturing" : s));
+        void refreshCameras();
+      } catch (e) {
+        setError(`Camera failed: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus("error");
+      }
+    },
+    [cameraId, refreshCameras],
+  );
 
   const snapshotBase64 = useCallback((): string => {
     const v = videoRef.current;
@@ -262,167 +291,192 @@ const AUTO_STOP_MS = 3 * 60 * 1000;
 
   return (
     <>
-      <header className="topbar">
+      <div className="stage">
+        <video ref={videoRef} muted playsInline autoPlay />
+        <canvas
+          ref={canvasRef}
+          className="overlay"
+          onMouseDown={(e) => {
+            if (!drawing) return;
+            const p = canvasPos(e);
+            setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+          }}
+          onMouseMove={(e) => {
+            if (!drawing || !draft) return;
+            const p = canvasPos(e);
+            setDraft({ ...draft, x1: p.x, y1: p.y });
+          }}
+          onMouseUp={() => {
+            if (!drawing || !draft) return;
+            const name = zoneName.trim() || "zone";
+            const poly: [number, number][] = [
+              [Math.min(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
+              [Math.max(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
+              [Math.max(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
+              [Math.min(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
+            ];
+            setZones((prev) => [...prev.filter((z) => z.id !== name), { id: name, name, polygon: poly }]);
+            setDraft(null);
+            setDrawing(false);
+          }}
+        />
+      </div>
+      <canvas ref={snapRef} style={{ display: "none" }} />
+
+      <div className="brand">
         <h1>WorldDebugger</h1>
         <span className="tagline">Debug the physical world.</span>
-        <span className="spacer" />
+      </div>
+      <div className="top-right">
         <span className={`status-pill ${status}`}>{status}</span>
-      </header>
-      <main className="layout">
-        <section className="card">
-          <h2>Live Camera</h2>
-          <div className="camera-wrap">
-            <video ref={videoRef} muted playsInline autoPlay />
-            <canvas
-              ref={canvasRef}
-              className="overlay"
-              onMouseDown={(e) => {
-                if (!drawing) return;
-                const p = canvasPos(e);
-                setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
-              }}
-              onMouseMove={(e) => {
-                if (!drawing || !draft) return;
-                const p = canvasPos(e);
-                setDraft({ ...draft, x1: p.x, y1: p.y });
-              }}
-              onMouseUp={() => {
-                if (!drawing || !draft) return;
-                const name = zoneName.trim() || "zone";
-                const poly: [number, number][] = [
-                  [Math.min(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
-                  [Math.max(draft.x0, draft.x1), Math.min(draft.y0, draft.y1)],
-                  [Math.max(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
-                  [Math.min(draft.x0, draft.x1), Math.max(draft.y0, draft.y1)],
-                ];
-                setZones((prev) => [...prev.filter((z) => z.id !== name), { id: name, name, polygon: poly }]);
-                setDraft(null);
-                setDrawing(false);
-              }}
-            />
-          </div>
-          <canvas ref={snapRef} style={{ display: "none" }} />
-          <div className="row">
-            <button onClick={() => void startCamera()}>Start camera</button>
-            <button onClick={() => void runAnalyze()}>Analyze</button>
-            <button className={auto ? "on" : ""} onClick={() => setAuto((a) => !a)}>
-              Auto {auto ? "on" : "off"}
-            </button>
-            {autoNote && !auto && <span className="hint">{autoNote}</span>}
-            <button
-              className={drawing ? "on" : ""}
-              onClick={() => {
-                setDrawing((d) => !d);
-                setDraft(null);
-              }}
-            >
-              {drawing ? "Drawing zone… click-drag" : "Draw zone"}
-            </button>
-            <input
-              type="text"
-              value={zoneName}
-              onChange={(e) => setZoneName(e.target.value)}
-              placeholder="zone name"
-              style={{ maxWidth: 140, flex: "none" }}
-            />
-          </div>
-          <div className="row">
-            {zones.map((z) => (
-              <span key={z.id} className="zone-chip">
-                {z.name}
-                <button onClick={() => setZones((prev) => prev.filter((x) => x.id !== z.id))}>×</button>
-              </span>
-            ))}
-          </div>
-          {error && <div className="error">{error}</div>}
-          <p className="hint">
-            Realtime preview, snapshot analysis every {POLL_MS / 1000}s when Auto is on
-            (Auto stops after 3 min).
-            Drag on the overlay to draw a zone rectangle.
-          </p>
-        </section>
+        <button className="icon" onClick={() => setMenuOpen((o) => !o)} title="Menu">
+          ☰
+        </button>
+      </div>
 
-        <div>
-          <section className="card">
-            <h2>Rules</h2>
-            <div className="row" style={{ marginTop: 0 }}>
-              <input
-                type="text"
-                value={ruleText}
-                onChange={(e) => setRuleText(e.target.value)}
-                placeholder="Describe a rule for this space..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void createRule();
-                }}
-              />
-              <button
-                className="primary"
-                onClick={() => void createRule()}
-                disabled={creating || ruleText.trim().length === 0}
-              >
-                {creating ? "Creating…" : "Create Rule"}
-              </button>
-            </div>
-            {compiledNote && <div className="ok-line">{compiledNote}</div>}
-            {rules.map((r) => (
-              <div key={r.id} className="rule-item">
-                <div className="head">
-                  <strong>{r.name}</strong>
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span className={`sev ${r.severity}`}>{r.severity}</span>
-                    <button onClick={() => void removeRule(r.id)}>Delete</button>
-                  </span>
-                </div>
-                <div className="meta">
-                  {r.condition.operator} · {r.original_text}
-                </div>
-                <div className="meta">
-                  detects: {r.selectors.map((s) => s.sam_prompt).join(", ")}
-                </div>
-                {r.condition.requires_metric_depth && (
-                  <div className="error">Needs metric depth — not available in this MVP.</div>
-                )}
-              </div>
+      <div className="dock">
+        {cameras.length > 1 && (
+          <select
+            value={cameraId}
+            onChange={(e) => {
+              setCameraId(e.target.value);
+              void startCamera(e.target.value);
+            }}
+            title="Camera"
+          >
+            <option value="">Default camera</option>
+            {cameras.map((c, i) => (
+              <option key={c.deviceId || i} value={c.deviceId}>
+                {c.label || `Camera ${i + 1}`}
+              </option>
             ))}
-            {rules.length === 0 && <p className="hint">No rules yet. Try “Keep drinks away from laptops.”</p>}
-          </section>
-
-          <section className="card" style={{ marginTop: 16 }}>
-            <h2>Issues</h2>
-            {violations.map((v, i) => (
-              <div key={`${v.rule_id}-${i}`} className="issue">
-                <div className="title">
-                  ⚠ {v.rule_name}
-                </div>
-                <div>{v.message}</div>
-                <div className="time">Detected just now</div>
-              </div>
-            ))}
-            {violations.length === 0 && <div className="ok-line">✓ No violations</div>}
-            {resolvedFlash && <div className="resolved-toast">✓ Resolved</div>}
-            <h2 style={{ marginTop: 12 }}>Detected objects</h2>
-            {objects.length === 0 && <p className="hint">Nothing detected in the last frame.</p>}
-            {objects.map((o) => (
-              <div key={o.id} className="meta" style={{ fontFamily: "monospace", fontSize: 11 }}>
-                {o.concept} {Math.round(o.confidence * 100)}% [{o.bbox.x_min.toFixed(2)},{" "}
-                {o.bbox.y_min.toFixed(2)}, {o.bbox.x_max.toFixed(2)}, {o.bbox.y_max.toFixed(2)}]
-              </div>
-            ))}
-          </section>
-
-          <section className="card" style={{ marginTop: 16 }}>
-            <h2>Demo without camera</h2>
-            <div className="row" style={{ marginTop: 0 }}>
-              <button onClick={() => void runAnalyze("default")}>Simulate: drink near laptop</button>
-              <button onClick={() => void runAnalyze("far")}>Simulate: drink moved away</button>
-            </div>
-            <p className="hint">Fixture frames for the Demo 1 violation → Resolved flow.</p>
-          </section>
+          </select>
+        )}
+        <button onClick={() => void startCamera()}>Start camera</button>
+        <button className="primary" onClick={() => void runAnalyze()}>
+          Analyze
+        </button>
+        <button className={auto ? "on" : ""} onClick={() => setAuto((a) => !a)}>
+          Auto {auto ? "on" : "off"}
+        </button>
+        <button className={drawing ? "on" : ""} onClick={() => {
+          setDrawing((d) => !d);
+          setDraft(null);
+        }}>
+          {drawing ? "Drawing… drag on video" : "Draw zone"}
+        </button>
+      </div>
+      {autoNote && !auto && (
+        <div className="toasts">
+          <div className="toast">{autoNote}</div>
         </div>
-      </main>
-      <footer className="foot">
-        Powered by Muse Spark 1.3 + SAM 3.1{mocked ? " · Mock mode" : ""}
-      </footer>
+      )}
+
+      <div className="toasts" style={autoNote && !auto ? { bottom: 76 } : undefined}>
+        {violations.slice(0, 2).map((v, i) => (
+          <div key={`${v.rule_id}-${i}`} className="toast">
+            <strong>⚠ {v.rule_name}</strong>
+            {v.message}
+          </div>
+        ))}
+        {resolvedFlash && violations.length === 0 && <div className="toast ok">✓ Resolved</div>}
+      </div>
+
+      <aside className={`drawer${menuOpen ? " open" : ""}`}>
+        <div className="close-row">
+          <button className="icon" onClick={() => setMenuOpen(false)} title="Close">
+            ×
+          </button>
+        </div>
+        <h2>Rules</h2>
+        <div className="row">
+          <input
+            type="text"
+            value={ruleText}
+            onChange={(e) => setRuleText(e.target.value)}
+            placeholder="Describe a rule for this space..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void createRule();
+            }}
+          />
+          <button
+            className="primary"
+            onClick={() => void createRule()}
+            disabled={creating || ruleText.trim().length === 0}
+          >
+            {creating ? "Creating…" : "Create Rule"}
+          </button>
+        </div>
+        {compiledNote && <div className="ok-line">{compiledNote}</div>}
+        {rules.map((r) => (
+          <div key={r.id} className="rule-item">
+            <div className="head">
+              <strong>{r.name}</strong>
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span className={`sev ${r.severity}`}>{r.severity}</span>
+                <button onClick={() => void removeRule(r.id)}>Delete</button>
+              </span>
+            </div>
+            <div className="meta">
+              {r.condition.operator} · {r.original_text}
+            </div>
+            <div className="meta">detects: {r.selectors.map((s) => s.sam_prompt).join(", ")}</div>
+            {r.condition.requires_metric_depth && (
+              <div className="error">Needs metric depth — not available in this MVP.</div>
+            )}
+          </div>
+        ))}
+        {rules.length === 0 && <p className="hint">No rules yet. Try “Keep drinks away from laptops.”</p>}
+
+        <h2>Zones</h2>
+        <div className="row">
+          <input
+            type="text"
+            value={zoneName}
+            onChange={(e) => setZoneName(e.target.value)}
+            placeholder="zone name"
+          />
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          {zones.length === 0 && <span className="hint">No zones. Use Draw zone, then drag on the video.</span>}
+          {zones.map((z) => (
+            <span key={z.id} className="zone-chip">
+              {z.name}
+              <button onClick={() => setZones((prev) => prev.filter((x) => x.id !== z.id))}>×</button>
+            </span>
+          ))}
+        </div>
+
+        <h2>Issues</h2>
+        {violations.map((v, i) => (
+          <div key={`${v.rule_id}-${i}`} className="issue">
+            <div className="title">⚠ {v.rule_name}</div>
+            <div>{v.message}</div>
+            <div className="time">Detected just now</div>
+          </div>
+        ))}
+        {violations.length === 0 && <div className="ok-line">✓ No violations</div>}
+        {resolvedFlash && <div className="resolved-toast">✓ Resolved</div>}
+
+        <h2>Detected objects</h2>
+        {objects.length === 0 && <p className="hint">Nothing detected in the last frame.</p>}
+        {objects.map((o) => (
+          <div key={o.id} className="detect-line">
+            {o.concept} {Math.round(o.confidence * 100)}% [{o.bbox.x_min.toFixed(2)},{" "}
+            {o.bbox.y_min.toFixed(2)}, {o.bbox.x_max.toFixed(2)}, {o.bbox.y_max.toFixed(2)}]
+          </div>
+        ))}
+
+        <h2>Demo without camera</h2>
+        <div className="row">
+          <button onClick={() => void runAnalyze("default")}>Simulate: drink near laptop</button>
+          <button onClick={() => void runAnalyze("far")}>Simulate: drink moved away</button>
+        </div>
+        <p className="hint">Fixture frames for the Demo 1 violation → Resolved flow.</p>
+
+        {error && <div className="error">{error}</div>}
+        <div className="foot">Powered by Muse Spark 1.3 + SAM 3.1{mocked ? " · Mock mode" : ""}</div>
+      </aside>
     </>
   );
 }
