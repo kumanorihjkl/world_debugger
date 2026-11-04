@@ -469,6 +469,13 @@ input:not([type]) {
   flex-direction: column;
   gap: 8px;
   max-width: min(360px, calc(100vw - 32px));
+  transition: bottom 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toasts {
+    transition: none;
+  }
 }
 
 .toast {

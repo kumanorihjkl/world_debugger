@@ -404,6 +404,8 @@ export default function App(): JSX.Element {
   const [cameraId, setCameraId] = useState("");
   const [hasStream, setHasStream] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [sheetH, setSheetH] = useState(0);
   const grabDrag = useRef<{ startY: number; moved: boolean } | null>(null);
   const grabMoved = useRef(false);
 
@@ -436,6 +438,17 @@ export default function App(): JSX.Element {
     void refreshCameras();
     navigator.mediaDevices?.addEventListener?.("devicechange", () => void refreshCameras());
   }, [refreshCameras]);
+
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const update = (): void => setSheetH(el.offsetHeight);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const [resolution, setResolution] = useState("");
   const [sensorSize, setSensorSize] = useState<[number, number]>([0, 0]);
@@ -702,7 +715,7 @@ export default function App(): JSX.Element {
         <span className={`status-pill ${status}`}>{status}</span>
       </div>
 
-      <div className="toasts">
+      <div className="toasts" style={{ bottom: sheetH > 0 ? sheetH + 12 : undefined }}>
         {error && <div className="toast">{error}</div>}
         {autoNote && !auto && <div className="toast">{autoNote}</div>}
         {violations.slice(0, 2).map((v, i) => (
@@ -714,7 +727,7 @@ export default function App(): JSX.Element {
         {resolvedFlash && violations.length === 0 && <div className="toast ok">✓ Resolved</div>}
       </div>
 
-      <div className={`sheet${sheetOpen ? " open" : ""}`}>
+      <div ref={sheetRef} className={`sheet${sheetOpen ? " open" : ""}`}>
         <div
           className="grabber"
           title={sheetOpen ? "Pull down to close" : "Pull up for rules"}
