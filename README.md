@@ -1,5 +1,7 @@
 # WorldDebugger
 
+[English](README.md) | [日本語](README.ja.md)
+
 > Software has linters. The physical world doesn’t.
 
 WorldDebugger lets users define **real-world rules in natural language**,
