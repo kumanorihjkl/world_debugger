@@ -799,12 +799,18 @@ export default function App(): JSX.Element {
             <span className="track" />
             Auto
           </label>
-          <button className={drawing ? "on" : ""} onClick={() => {
-            setDrawing((d) => !d);
-            setDraft(null);
-          }}>
-            {drawing ? "Drawing… trace an outline" : "Draw zone"}
-          </button>
+          {sheetOpen && sheetTab === "zones" && (
+            <button
+              className={drawing ? "on" : ""}
+              style={{ marginLeft: "auto" }}
+              onClick={() => {
+                setDrawing((d) => !d);
+                setDraft(null);
+              }}
+            >
+              {drawing ? "Drawing… trace an outline" : "Draw zone"}
+            </button>
+          )}
         </div>
         <div className="sheet-body">
           <div className="sheet-content">
