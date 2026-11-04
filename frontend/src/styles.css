@@ -254,6 +254,47 @@ button.on {
   padding: 2px 12px 12px;
 }
 
+.dock-spacer,
+.dock-tail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.dock-tail {
+  justify-content: flex-end;
+}
+
+.dock button.draw-zone {
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-color: transparent;
+  pointer-events: none;
+  transition: max-width 0.25s ease, opacity 0.25s ease, padding 0.25s ease;
+}
+
+.dock button.draw-zone.zone-visible {
+  max-width: 220px;
+  opacity: 1;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-color: #3a4552;
+  pointer-events: auto;
+}
+
+.dock button.draw-zone.zone-visible.on {
+  border-color: var(--warn);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock button.draw-zone {
+    transition: none;
+  }
+}
+
 .dock select,
 .sheet-content select {
   background: #0d1114;

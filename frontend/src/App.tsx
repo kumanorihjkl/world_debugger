@@ -787,6 +787,7 @@ export default function App(): JSX.Element {
           }}
         />
         <div className="dock">
+          <span className="dock-spacer" />
           <button className="primary" onClick={() => void runAnalyze()}>
             Analyze
           </button>
@@ -799,10 +800,11 @@ export default function App(): JSX.Element {
             <span className="track" />
             Auto
           </label>
-          {sheetTab === "zones" && (
+          <span className="dock-tail">
             <button
-              className={drawing ? "on" : ""}
-              style={{ marginLeft: "auto" }}
+              className={`draw-zone ${sheetTab === "zones" ? "zone-visible" : ""} ${drawing ? "on" : ""}`}
+              tabIndex={sheetTab === "zones" ? 0 : -1}
+              aria-hidden={sheetTab !== "zones"}
               onClick={() => {
                 setDrawing((d) => !d);
                 setDraft(null);
@@ -810,7 +812,7 @@ export default function App(): JSX.Element {
             >
               {drawing ? "Drawing… trace an outline" : "Draw zone"}
             </button>
-          )}
+          </span>
         </div>
         <div className="sheet-body">
           <div className="sheet-content">
