@@ -440,6 +440,18 @@ export default function App(): JSX.Element {
   }, [refreshCameras]);
 
   useEffect(() => {
+    if (!sheetOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      if (drawing) return;
+      const t = e.target as Element | null;
+      if (!t || t.closest(".sheet") || t.closest(".toasts")) return;
+      setSheetOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [sheetOpen, drawing]);
+
+  useEffect(() => {
     const el = sheetRef.current;
     if (!el) return;
     const update = (): void => setSheetH(el.offsetHeight);
