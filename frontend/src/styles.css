@@ -286,9 +286,9 @@ button.big {
 }
 
 .sheet-body {
-  max-height: 0;
+  height: 0;
   overflow: hidden;
-  transition: max-height 0.25s ease;
+  transition: height 0.25s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -298,7 +298,7 @@ button.big {
 }
 
 .sheet.open .sheet-body {
-  max-height: 62vh;
+  height: 62vh;
   overflow-y: auto;
 }
 
