@@ -786,7 +786,7 @@ export default function App(): JSX.Element {
             grabDrag.current = null;
           }}
         />
-        <div className="dock">
+        <div className={`dock${sheetTab === "zones" ? " zones-mode" : ""}`}>
           <span className="dock-spacer" />
           <button className="primary" onClick={() => void runAnalyze()}>
             Analyze

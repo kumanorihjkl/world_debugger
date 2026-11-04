@@ -261,6 +261,14 @@ button.on {
   display: flex;
 }
 
+.dock-spacer {
+  transition: flex-grow 0.25s ease;
+}
+
+.dock.zones-mode .dock-spacer {
+  flex-grow: 0.0001;
+}
+
 .dock-tail {
   justify-content: flex-end;
 }
@@ -290,7 +298,8 @@ button.on {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dock button.draw-zone {
+  .dock button.draw-zone,
+  .dock-spacer {
     transition: none;
   }
 }
