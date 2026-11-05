@@ -666,7 +666,7 @@ export default function App(): JSX.Element {
     setRules((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  const canvasPos = (e: React.MouseEvent): { x: number; y: number } => {
+  const canvasPos = (e: React.PointerEvent): { x: number; y: number } => {
     const c = canvasRef.current;
     const v = videoRef.current;
     if (!c) return { x: 0, y: 0 };
@@ -710,13 +710,18 @@ export default function App(): JSX.Element {
         <canvas
           ref={canvasRef}
           className="overlay"
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             if (!drawing) return;
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* capture unsupported: drag still works within the canvas */
+            }
             const p = canvasPos(e);
             setError("");
             setDraft([[p.x, p.y]]);
           }}
-          onMouseMove={(e) => {
+          onPointerMove={(e) => {
             if (!drawing || !draft) return;
             const p = canvasPos(e);
             const last = draft[draft.length - 1];
@@ -726,7 +731,7 @@ export default function App(): JSX.Element {
             if (draft.length >= MAX_ZONE_POINTS * 4) return;
             setDraft([...draft, [p.x, p.y]]);
           }}
-          onMouseUp={() => {
+          onPointerUp={() => {
             if (!drawing || !draft) return;
             const finish = (message: string): void => {
               setError(message);
@@ -754,6 +759,9 @@ export default function App(): JSX.Element {
             setError("");
             setDraft(null);
             setDrawing(false);
+          }}
+          onPointerCancel={() => {
+            if (drawing) setDraft(null);
           }}
         />
       </div>
